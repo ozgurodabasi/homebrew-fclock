@@ -60,6 +60,7 @@ fclock [OPTIONS]
 | `--matrix` | Matrix digital rain background |
 | `--thinner` | 7-segment LCD style digits |
 | `--runoncomplete <script>` | Run a script on countdown complete, or on quit for stopwatch/clock |
+| `--version` | Print version and exit |
 
 Press **`q`** or **`Esc`** to quit. Press **`Space`** during a countdown or stopwatch to record a lap time. On quit, laps, the last time, and total session duration are printed to the terminal.
 
@@ -70,7 +71,7 @@ Press **`q`** or **`Esc`** to quit. Press **`Space`** during a countdown or stop
 ```
 $ fclock --help
 
-fclock — full-screen terminal clock and countdown timer
+fclock 0.1.2 — full-screen terminal clock and countdown timer
 
 USAGE
   fclock [OPTIONS]
@@ -86,6 +87,7 @@ OPTIONS
   --matrix                Matrix digital rain background
   --thinner               7-segment LCD style digits
   --runoncomplete <path>  Run a script on countdown complete, or on quit for stopwatch/clock
+  --version               Print version and exit
   --help                  Show this help
 
 COLOURS

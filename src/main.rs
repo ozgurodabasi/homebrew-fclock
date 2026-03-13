@@ -2,6 +2,42 @@ use std::env;
 use std::io::{stdout, Write};
 use std::time::Duration;
 
+// ── screensaver / display-sleep prevention ───────────────────────────────────
+
+#[cfg(target_os = "macos")]
+mod screensaver {
+    use std::process::{Child, Command};
+
+    /// Spawns `caffeinate -d -i` to prevent display sleep and screensaver.
+    /// Killed automatically on `Drop`.
+    pub struct Guard(Child);
+
+    impl Guard {
+        pub fn new() -> Option<Self> {
+            Command::new("caffeinate")
+                .args(["-d", "-i"])
+                .spawn()
+                .ok()
+                .map(Guard)
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod screensaver {
+    pub struct Guard;
+    impl Guard {
+        pub fn new() -> Option<Self> { Some(Guard) }
+    }
+}
+
 use chrono::{Local, Utc, Timelike};
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -482,8 +518,12 @@ fn main() -> std::io::Result<()> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--version" | "-V" | "-v" => {
+                println!("fclock {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
             "--help" | "help" | "-h" => {
-                println!("fclock — full-screen terminal clock and countdown timer\n");
+                println!("fclock {} — full-screen terminal clock and countdown timer\n", env!("CARGO_PKG_VERSION"));
                 println!("USAGE");
                 println!("  fclock [OPTIONS]\n");
                 println!("OPTIONS");
@@ -497,6 +537,7 @@ fn main() -> std::io::Result<()> {
                 println!("  --matrix                Matrix digital rain background");
                 println!("  --thinner               7-segment LCD style digits");
                 println!("  --runoncomplete <path>  Run a script on countdown complete or on quit (stopwatch/clock)");
+                println!("  --version               Print version and exit");
                 println!("  --help                  Show this help\n");
                 println!("COLOURS");
                 println!("  red green blue yellow cyan magenta white grey");
@@ -560,6 +601,7 @@ fn main() -> std::io::Result<()> {
     }
 
     let start = std::time::Instant::now();
+    let _no_sleep = screensaver::Guard::new(); // prevent display sleep / screensaver
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, Hide)?;
     terminal::enable_raw_mode()?;
