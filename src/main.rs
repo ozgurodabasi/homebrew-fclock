@@ -602,7 +602,7 @@ fn main() -> std::io::Result<()> {
 
     let start = std::time::Instant::now();
     let _no_sleep = screensaver::Guard::new(); // prevent display sleep / screensaver
-    let mut stdout = stdout();
+    let mut stdout = std::io::BufWriter::new(stdout());
     execute!(stdout, EnterAlternateScreen, Hide)?;
     terminal::enable_raw_mode()?;
 
@@ -651,6 +651,20 @@ fn run_loop(
     let mut last_time: Option<String> = None;
     let mut script_fired = false;
     let mut laps: Vec<String> = Vec::new();
+
+    // Caches to avoid re-allocating on frames where nothing changed.
+    let mut prev_render_key = (u32::MAX, u32::MAX, u32::MAX, u32::MAX, false);
+    let mut laps_cached_len = 0usize;
+    let mut lap_str_cache = String::new();
+
+    // Pre-compute the hint string — it never changes during a run.
+    let hint: String = if countdown_secs.is_some() || stopwatch {
+        "space: lap  q: quit".to_owned()
+    } else if let Some(off) = gmt_offset {
+        format!("GMT{:+}  q: quit", off)
+    } else {
+        "q: quit".to_owned()
+    };
 
     loop {
         // faster tick in matrix mode for smooth rain
@@ -710,13 +724,21 @@ fn run_loop(
             }
         };
 
-        // Build the human-readable time string used for quit-print and script env.
+        // Build the human-readable time string — only when the displayed value changes.
         let with_ms = show_ms || stopwatch;
-        last_time = Some(if with_ms {
-            format!("{:02}:{:02}:{:02}.{:02}", h, m, s, ms / 10)
-        } else {
-            format!("{:02}:{:02}:{:02}", h, m, s)
-        });
+        let cs = ms / 10; // centiseconds (resolution shown on screen)
+        let render_key = (h, m, s, if with_ms { cs } else { 0 }, done);
+        let time_changed = render_key != prev_render_key;
+        let laps_changed = laps.len() != laps_cached_len;
+
+        if time_changed {
+            prev_render_key = render_key;
+            last_time = Some(if with_ms {
+                format!("{:02}:{:02}:{:02}.{:02}", h, m, s, cs)
+            } else {
+                format!("{:02}:{:02}:{:02}", h, m, s)
+            });
+        }
 
         // Fire script once when countdown reaches zero.
         if done && !script_fired {
@@ -727,6 +749,20 @@ fn run_loop(
                     .env("FCLOCK_EVENT", "complete")
                     .spawn();
             }
+        }
+
+        // Rebuild lap string only when a new lap is recorded.
+        if laps_changed {
+            laps_cached_len = laps.len();
+            lap_str_cache = laps.iter().enumerate()
+                .map(|(i, t)| format!("lap {}: {}", i + 1, t))
+                .collect::<Vec<_>>()
+                .join("  —  ");
+        }
+
+        // Skip redraw entirely when nothing visible has changed (no matrix animation).
+        if !matrix && !time_changed && !laps_changed {
+            continue;
         }
 
         let ms_opt = if with_ms { Some(ms) } else { None };
@@ -785,19 +821,15 @@ fn run_loop(
             ));
         }
 
-        if !laps.is_empty() {
-            let lap_str = laps.iter().enumerate()
-                .map(|(i, t)| format!("lap {}: {}", i + 1, t))
-                .collect::<Vec<_>>()
-                .join("  —  ");
-            let lx = (tw as usize).saturating_sub(lap_str.len()) / 2;
+        if !lap_str_cache.is_empty() {
+            let lx = (tw as usize).saturating_sub(lap_str_cache.len()) / 2;
             let clock_h = if thinner { scale_y * 2 + 3 } else { 5 * scale_y };
             let ly = row + clock_h + 1;
             if ly < th as usize {
                 try_io!(queue!(stdout,
                     MoveTo(lx as u16, ly as u16),
                     SetForegroundColor(Color::DarkGrey),
-                    Print(&lap_str),
+                    Print(&lap_str_cache),
                     ResetColor,
                 ));
             }
@@ -805,21 +837,12 @@ fn run_loop(
 
         try_io!(render_clock(stdout, &segs, col, row, param, scale_y, clock_color, matrix, thinner));
 
-        let hint_buf;
-        let hint = if countdown_secs.is_some() || stopwatch {
-            "space: lap  q: quit"
-        } else if let Some(off) = gmt_offset {
-            hint_buf = format!("GMT{:+}  q: quit", off);
-            &hint_buf
-        } else {
-            "q: quit"
-        };
         try_io!(queue!(
             stdout,
             ResetColor,
             MoveTo((tw as usize).saturating_sub(hint.len()) as u16, th - 1),
             SetForegroundColor(Color::DarkGrey),
-            Print(hint),
+            Print(hint.as_str()),
             ResetColor,
         ));
 
